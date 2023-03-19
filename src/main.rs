@@ -189,9 +189,12 @@ struct Section {
 // const FILES_NAMES: &[&str; 6] = &[
 //     /*"e101",*/ "csc216", "csc217", "csc226", "ma305", "py208", "py209",
 // ];
-const FILES_NAMES: &[&str; 7] = &[
-    "e101", "csc216", "csc217", "csc226", "ma305", "py208", "py209",
-];
+// const FILES_NAMES: &[&str; 7] = &[
+//     "e101", "csc216", "csc217", "csc226", "ma305", "py208", "py209",
+// ];
+// const FILES_NAMES: &[&str; 6] = &["bme201", "bme209", "bme298", "ch223", "ch224", "ma341"];
+// const FILES_NAMES: &[&str; 5] = &["csc230", "csc316", "csc333", "heso258", "csc342"];
+const FILES_NAMES: &[&str; 6] = &["csc230", "csc316", "csc333", "heso258", "ma341", "eng331"];
 
 fn main() {
     // let mut classes = load_classes();
@@ -206,26 +209,38 @@ fn main() {
 
     let mut acc = 1;
 
+    for (k, v) in classes.iter() {
+        acc *= v.len();
+        println!("{k:?}: {:?}", v.len());
+    }
+
     // NOTE: Filter
     for (_, v) in classes.iter_mut() {
         v.retain(|x| {
+            // No online classes
+            if x.meet_days.len() == 0 {
+                return false;
+            }
+
             // Payload Meeting
-            let payload = x.meet_days.contains(&Day::Wed)
-                && x.time.overlap(&TimeRange {
-                    start: Time {
-                        hour: 12 + 3,
-                        minute: 0,
-                    },
-                    end: Time {
-                        hour: 12 + 4,
-                        minute: 0,
-                    },
-                });
+            // This is too unreliable
+            // let payload = x.meet_days.contains(&Day::Wed)
+            //     && x.time.overlap(&TimeRange {
+            //         start: Time {
+            //             hour: 12 + 3,
+            //             minute: 0,
+            //         },
+            //         end: Time {
+            //             hour: 12 + 4,
+            //             minute: 0,
+            //         },
+            //     });
 
             // Late classes
             //let late = x.time.end.hour >= 12 + 6;
             // let late = x.time.end.hour >= 12 + 5;
-            let late = x.time.end.hour >= 12 + 5;
+            // let late = x.time.end.hour >= 12 + 5;
+            let late = false;
 
             // Early classes
             //let early = x.time.start.hour <= 8;
@@ -234,7 +249,7 @@ fn main() {
             //
 
             // let mut early = x.time.start.hour <= 8 && x.campus == Campus::Centinnial;
-            let mut early = x.time.start.hour <= 8;
+            let early = x.time.start.hour <= 8;
 
             // :(
             // if x.class == "CSC 216" || x.class == "PY 209" {
@@ -246,14 +261,18 @@ fn main() {
             // if !x.meet_days.contains(&Day::Mon) {
             //     early = false;
             // }
-            if x.class == "CSC 216" {
-                early = false;
-            }
+            // if x.class == "CSC 216" {
+            //     early = false;
+            // }
 
-            !(payload || late || early)
+            // No friday classes
+            let fri = x.meet_days.contains(&Day::Fri);
+
+            !(late || early || fri)
         })
     }
 
+    println!("After filter");
     for (k, v) in classes.iter() {
         acc *= v.len();
         println!("{k:?}: {:?}", v.len());
@@ -272,12 +291,12 @@ fn main() {
     // }
 
     println!("Number of solutions: {}", solutions.len());
-    println!("Len of solutions: {:?}", {
-        let mut y = solutions.iter().map(|x| x.len()).collect::<Vec<usize>>();
-        y.sort();
-        y.dedup();
-        y
-    });
+    // println!("Len of solutions: {:?}", {
+    //     let mut y = solutions.iter().map(|x| x.len()).collect::<Vec<usize>>();
+    //     y.sort();
+    //     y.dedup();
+    //     y
+    // });
 
     println!("{:?}", solutions.first().unwrap());
 
@@ -309,6 +328,30 @@ fn draw_classes(solutions: Vec<Vec<Section>>) -> Result<(), Box<dyn std::error::
         chart
             .configure_mesh()
             .y_labels(h_count + 1)
+            .y_label_formatter(&|&x| {
+                let am = x <= 12.0;
+                format!(
+                    "{:0.} {}",
+                    if am { x } else { x - 12.0 },
+                    if am { "AM" } else { "PM" }
+                )
+            })
+            .x_label_formatter(&|&x| {
+                if x.fract() != 0.0 {
+                    return "".to_string();
+                }
+
+                let x = x as i32;
+                match x {
+                    1 => "Mon",
+                    2 => "Tue",
+                    3 => "Wed",
+                    4 => "Thu",
+                    5 => "Fri",
+                    _ => "",
+                }
+                .to_string()
+            })
             .light_line_style(&TRANSPARENT)
             .disable_x_mesh()
             .draw()?;
@@ -404,6 +447,7 @@ fn possible_schedules_recursive(
     solutions
 }
 
+#[allow(unused)]
 fn load_classes() -> ClassMap {
     let mut map = HashMap::new();
 
@@ -418,6 +462,7 @@ fn load_classes() -> ClassMap {
     map
 }
 
+#[allow(unused)]
 fn save_classes() {
     _ = std::fs::create_dir("output");
 
@@ -437,7 +482,10 @@ fn save_classes() {
 fn grade_data(file_name: &str) -> HashMap<String, Rating> {
     let mut grades: HashMap<String, Rating> = HashMap::new();
 
-    let grade_file = File::open(format! {"data/grades/{file_name}.json"}).expect("File must exist");
+    let grade_file = match File::open(format! {"data/grades/{file_name}.json"}) {
+        Ok(x) => x,
+        Err(_) => return grades,
+    };
     let reader = BufReader::new(grade_file);
     let root: GradeRoot = serde_json::from_reader(reader).unwrap();
 
@@ -479,9 +527,6 @@ fn class_data(file_name: &str) -> Vec<Section> {
     let root: SectionRoot = serde_json::from_reader(reader).unwrap();
     let data = root.data;
 
-    let count = data.len();
-    println!("There are {count} items before filter");
-
     // let data = data.iter().filter(|x| filter_in_person(x));
     // let data: Vec<_> = data.filter(|x| filter_8_30(x)).collect();
 
@@ -499,12 +544,6 @@ fn class_data(file_name: &str) -> Vec<Section> {
 
             // NOTE: This assumes every class is at the same time
             let calendar_info = &section.calendar_info[0];
-
-            // NOTE: You may want to change this
-            // Filter to in person
-            if section.meet_days == "" {
-                return None;
-            };
 
             let meet_days: Vec<Day> = {
                 let mut meet_days = Vec::new();
@@ -529,12 +568,6 @@ fn class_data(file_name: &str) -> Vec<Section> {
 
                 meet_days
             };
-
-            // NOTE
-            // No fridays
-            if meet_days.contains(&Day::Fri) {
-                return None;
-            }
 
             let campus = if section.location.contains("North") {
                 Campus::North
@@ -580,9 +613,6 @@ fn class_data(file_name: &str) -> Vec<Section> {
             })
         })
         .collect();
-
-    let count = data.len();
-    println!("There are {count} items after filter");
 
     data
 }
