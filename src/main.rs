@@ -11,18 +11,15 @@ use std::{fs::File, io::BufReader};
 mod data;
 use data::*;
 
-mod data_grade;
-use data_grade::*;
-
 type ClassMap = HashMap<String, Vec<Section>>;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 enum Campus {
     North,
     Centinnial,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 enum Day {
     Mon,
     Tue,
@@ -99,19 +96,33 @@ impl Range for TimeRange {
     }
 }
 
-impl Range for Vec<Day> {
+impl Range for Day {
     fn overlap(&self, other: &Self) -> bool {
-        self.iter().any(|x| other.contains(x))
+        self == other
+    }
+}
+
+impl Range for DayTime {
+    fn overlap(&self, other: &Self) -> bool {
+        self.meet_day.overlap(&other.meet_day)
+            && self.time.overlap(&other.time)
+            && self.campus == other.campus
+    }
+}
+
+impl Range for Vec<DayTime> {
+    fn overlap(&self, other: &Self) -> bool {
+        self.iter().any(|x| other.iter().any(|y| x.overlap(y)))
     }
 }
 
 impl Range for Section {
     fn overlap(&self, other: &Self) -> bool {
-        self.time.overlap(&other.time) && self.meet_days.overlap(&other.meet_days)
+        self.meetings.overlap(&other.meetings)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 struct TimeRange {
     start: Time,
     end: Time,
@@ -173,14 +184,18 @@ struct Section {
     class: String,
     section: String,
 
-    campus: Campus,
     facility: String,
 
-    meet_days: Vec<Day>,
-    time: TimeRange,
+    meetings: Vec<DayTime>,
 
     professor: String,
-    rating: Rating,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct DayTime {
+    meet_day: Day,
+    time: TimeRange,
+    campus: Campus,
 }
 
 // const FILES_NAMES: &[&str; 5] = &[
@@ -193,8 +208,10 @@ struct Section {
 //     "e101", "csc216", "csc217", "csc226", "ma305", "py208", "py209",
 // ];
 // const FILES_NAMES: &[&str; 6] = &["bme201", "bme209", "bme298", "ch223", "ch224", "ma341"];
-// const FILES_NAMES: &[&str; 5] = &["csc230", "csc316", "csc333", "heso258", "csc342"];
-const FILES_NAMES: &[&str; 6] = &["csc230", "csc316", "csc333", "heso258", "ma341", "eng331"];
+const FILES_NAMES: &[&str; 5] = &["csc230", "csc316", "csc333", "heso258", "ma341"];
+// const FILES_NAMES: &[&str; 7] = &[
+//     "mae206", "py208", "ma242", "mae200", "st370", "py209", "csc113",
+// ];
 
 fn main() {
     // let mut classes = load_classes();
@@ -218,7 +235,7 @@ fn main() {
     for (_, v) in classes.iter_mut() {
         v.retain(|x| {
             // No online classes
-            if x.meet_days.len() == 0 {
+            if x.meetings.len() == 0 {
                 return false;
             }
 
@@ -237,10 +254,11 @@ fn main() {
             //     });
 
             // Late classes
-            //let late = x.time.end.hour >= 12 + 6;
-            // let late = x.time.end.hour >= 12 + 5;
-            // let late = x.time.end.hour >= 12 + 5;
-            let late = false;
+            let late = x
+                .meetings
+                .iter()
+                .any(|m| m.time.end.hour >= 12 + 6 && x.class != "PY 208");
+            // let late = false;
 
             // Early classes
             //let early = x.time.start.hour <= 8;
@@ -249,7 +267,8 @@ fn main() {
             //
 
             // let mut early = x.time.start.hour <= 8 && x.campus == Campus::Centinnial;
-            let early = x.time.start.hour <= 8;
+            let early = x.meetings.iter().any(|m| m.time.start.hour <= 8);
+            // let early = false;
 
             // :(
             // if x.class == "CSC 216" || x.class == "PY 209" {
@@ -266,7 +285,8 @@ fn main() {
             // }
 
             // No friday classes
-            let fri = x.meet_days.contains(&Day::Fri);
+            let fri = x.meetings.iter().any(|m| m.meet_day == Day::Fri);
+            // let fri = false;
 
             !(late || early || fri)
         })
@@ -341,8 +361,7 @@ fn draw_classes(solutions: Vec<Vec<Section>>) -> Result<(), Box<dyn std::error::
                     return "".to_string();
                 }
 
-                let x = x as i32;
-                match x {
+                match x as i32 {
                     1 => "Mon",
                     2 => "Tue",
                     3 => "Wed",
@@ -364,10 +383,10 @@ fn draw_classes(solutions: Vec<Vec<Section>>) -> Result<(), Box<dyn std::error::
         };
 
         chart.draw_series(data.iter().flat_map(|x| {
-            x.meet_days.iter().map(|day| {
-                let size = size(x.time.len() as f32 / 60.);
+            x.meetings.iter().map(|meeting| {
+                let size = size(meeting.time.len() as f32 / 60.);
 
-                let pos_x = match day {
+                let pos_x = match meeting.meet_day {
                     Day::Mon => 1.0,
                     Day::Tue => 2.0,
                     Day::Wed => 3.0,
@@ -375,9 +394,9 @@ fn draw_classes(solutions: Vec<Vec<Section>>) -> Result<(), Box<dyn std::error::
                     Day::Fri => 5.0,
                 };
 
-                let pos_y = x.time.start.hour as f32 + x.time.start.minute as f32 / 60.;
+                let pos_y = meeting.time.start.hour as f32 + meeting.time.start.minute as f32 / 60.;
 
-                let color = match x.campus {
+                let color = match meeting.campus {
                     Campus::North => RGBColor(200, 150, 150),
                     Campus::Centinnial => RGBColor(150, 150, 200),
                 };
@@ -409,12 +428,21 @@ fn possible_schedules(classes: &ClassMap) -> Vec<Vec<Section>> {
 fn practical(this: &Section, other: &Section) -> bool {
     let overlap = this.overlap(other);
 
-    let campus_travel = this.campus != other.campus
-        && this.meet_days.overlap(&other.meet_days)
-        && other.time.overlap(&TimeRange {
-            start: this.time.start - 30,
-            end: this.time.end + 30,
-        });
+    let campus_travel = {
+        this.meetings.iter().any(|x| {
+            let expanded_range = TimeRange {
+                start: x.time.start - 30,
+                end: x.time.end + 30,
+            };
+
+            other
+                .meetings
+                .iter()
+                .filter(|y| y.meet_day == x.meet_day)
+                .filter(|y| y.time.overlap(&expanded_range))
+                .any(|y| x.campus != y.campus)
+        })
+    };
 
     !(overlap || campus_travel)
 }
@@ -479,48 +507,7 @@ fn save_classes() {
     }
 }
 
-fn grade_data(file_name: &str) -> HashMap<String, Rating> {
-    let mut grades: HashMap<String, Rating> = HashMap::new();
-
-    let grade_file = match File::open(format! {"data/grades/{file_name}.json"}) {
-        Ok(x) => x,
-        Err(_) => return grades,
-    };
-    let reader = BufReader::new(grade_file);
-    let root: GradeRoot = serde_json::from_reader(reader).unwrap();
-
-    let data = root.individual;
-
-    for item in data {
-        let instructor = item.instructor_name;
-
-        let count_a = item.grades.a.raw as u64;
-        let count = item.grades.total.raw as u64;
-
-        let percent_a = count_a as f64 / count as f64;
-
-        if let Some(grade) = grades.get_mut(&instructor) {
-            grade.count += count;
-            grade.count_a += count_a;
-            grade.percent_a = grade.count_a as f64 / grade.count as f64;
-        } else {
-            grades.insert(
-                instructor,
-                Rating {
-                    percent_a,
-                    count_a,
-                    count,
-                },
-            );
-        }
-    }
-
-    grades
-}
-
 fn class_data(file_name: &str) -> Vec<Section> {
-    let grade_data = grade_data(file_name);
-
     let section_file =
         File::open(format! {"data/section/{file_name}.json"}).expect("File must exist");
     let reader = BufReader::new(section_file);
@@ -533,83 +520,75 @@ fn class_data(file_name: &str) -> Vec<Section> {
     let data: Vec<Section> = data
         .iter()
         .filter_map(|data| {
-            // assert!(data.section_details.len() == 1);
-            // Sketch filter for physics late test block
-            assert!(data.section_details.len() <= 2);
-            let section = if data.section_details.len() == 2 {
-                &data.section_details[1]
-            } else {
-                &data.section_details[0]
-            };
+            let meetings = data
+                .section_details
+                .iter()
+                .flat_map(|section| {
+                    let meet_days: Vec<Day> = {
+                        let mut meet_days = Vec::new();
 
-            // NOTE: This assumes every class is at the same time
-            let calendar_info = &section.calendar_info[0];
+                        let days = section.meet_days.to_lowercase();
 
-            let meet_days: Vec<Day> = {
-                let mut meet_days = Vec::new();
+                        if days.contains("mon") {
+                            meet_days.push(Day::Mon);
+                        }
+                        if days.contains("tue") {
+                            meet_days.push(Day::Tue);
+                        }
+                        if days.contains("wed") {
+                            meet_days.push(Day::Wed);
+                        }
+                        if days.contains("thu") {
+                            meet_days.push(Day::Thu);
+                        }
+                        if days.contains("fri") {
+                            meet_days.push(Day::Fri);
+                        }
 
-                let days = section.meet_days.to_lowercase();
+                        meet_days
+                    };
 
-                if days.contains("mon") {
-                    meet_days.push(Day::Mon);
-                }
-                if days.contains("tue") {
-                    meet_days.push(Day::Tue);
-                }
-                if days.contains("wed") {
-                    meet_days.push(Day::Wed);
-                }
-                if days.contains("thu") {
-                    meet_days.push(Day::Thu);
-                }
-                if days.contains("fri") {
-                    meet_days.push(Day::Fri);
-                }
+                    let campus = if section.location.contains("North") {
+                        Campus::North
+                    } else {
+                        Campus::Centinnial
+                    };
 
-                meet_days
-            };
+                    // NOTE: This assumes every class is at the same time
+                    let calendar_info = &section.calendar_info[0];
 
-            let campus = if section.location.contains("North") {
-                Campus::North
-            } else {
-                Campus::Centinnial
-            };
+                    let time = TimeRange {
+                        start: calendar_info.start_time.parse().unwrap(),
+                        end: calendar_info.end_time.parse().unwrap(),
+                    };
 
-            let time = TimeRange {
-                start: calendar_info.start_time.parse().unwrap(),
-                end: calendar_info.end_time.parse().unwrap(),
-            };
-
-            // assert!(section.instructors.len() == 1);
-            let professor = if section.instructors.len() >= 1 {
-                section.instructors[0].clone()
-            } else {
-                String::from("")
-            };
-
-            let rating = grade_data
-                .get(&professor)
-                .unwrap_or(&Rating {
-                    percent_a: 0.,
-                    count_a: 0,
-                    count: 0,
+                    meet_days
+                        .iter()
+                        .map(move |&meet_day| DayTime {
+                            meet_day,
+                            time,
+                            campus: campus.clone(),
+                        })
+                        .collect::<Vec<_>>()
                 })
+                .collect();
+
+            let professor: String = data
+                .section_details
+                .iter()
+                .find_map(|x| x.instructors.first())
+                .unwrap_or(&String::from(""))
                 .clone();
 
-            // Filter for easy classes
-            // if rating.percent_a < 0.7 && rating.count > 0 {
-            //     return None;
-            // }
+            let section: String = data.section_details[0].section.clone();
+            let facility: String = data.section_details[0].facility.clone();
 
             Some(Section {
                 class: data.classs.clone(),
-                section: section.section.clone(),
-                campus,
-                facility: section.facility.clone(),
-                meet_days,
-                time,
+                section,
+                facility,
+                meetings,
                 professor,
-                rating,
             })
         })
         .collect();
