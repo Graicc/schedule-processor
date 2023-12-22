@@ -1,7 +1,6 @@
 use plotters::prelude::*;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::ops::Add;
 use std::ops::Sub;
@@ -10,8 +9,6 @@ use std::{fs::File, io::BufReader};
 
 mod data;
 use data::*;
-
-type ClassMap = HashMap<String, Vec<Section>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 enum Campus {
@@ -28,7 +25,7 @@ enum Day {
     Fri,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Serialize, Deserialize)]
 struct Time {
     hour: u32,
     minute: u32,
@@ -172,14 +169,14 @@ impl Sub<u32> for Time {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Rating {
     percent_a: f64,
     count_a: u64,
     count: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Section {
     class: String,
     section: String,
@@ -191,7 +188,7 @@ struct Section {
     professor: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 struct DayTime {
     meet_day: Day,
     time: TimeRange,
@@ -208,31 +205,25 @@ struct DayTime {
 //     "e101", "csc216", "csc217", "csc226", "ma305", "py208", "py209",
 // ];
 // const FILES_NAMES: &[&str; 6] = &["bme201", "bme209", "bme298", "ch223", "ch224", "ma341"];
-const FILES_NAMES: &[&str; 5] = &["csc230", "csc316", "csc333", "heso258", "ma341"];
+//const FILES_NAMES: &[&str; 5] = &["csc230", "csc316", "csc333", "heso258", "ma341"];
 // const FILES_NAMES: &[&str; 7] = &[
 //     "mae206", "py208", "ma242", "mae200", "st370", "py209", "csc113",
 // ];
 
-fn main() {
-    // let mut classes = load_classes();
-    let mut classes: ClassMap = {
-        let mut classes = HashMap::new();
-        for file in FILES_NAMES {
-            classes.insert(String::from(*file), class_data(file));
-        }
+const FILES_NAMES: &[&str; 3] = &["csc246", "csc326", "csc379"];
 
-        classes
-    };
+fn main() {
+    let mut classes: Vec<Vec<Section>> = FILES_NAMES.iter().map(|&file| class_data(file)).collect();
 
     let mut acc = 1;
 
-    for (k, v) in classes.iter() {
+    for v in classes.iter() {
         acc *= v.len();
-        println!("{k:?}: {:?}", v.len());
+        println!("{:?}: {:?}", v[0].class, v.len());
     }
 
     // NOTE: Filter
-    for (_, v) in classes.iter_mut() {
+    for v in classes.iter_mut() {
         v.retain(|x| {
             // No online classes
             if x.meetings.len() == 0 {
@@ -254,11 +245,11 @@ fn main() {
             //     });
 
             // Late classes
-            let late = x
-                .meetings
-                .iter()
-                .any(|m| m.time.end.hour >= 12 + 6 && x.class != "PY 208");
-            // let late = false;
+            // let late = x
+            //     .meetings
+            //     .iter()
+            //     .any(|m| m.time.end.hour >= 12 + 6 && x.class != "PY 208");
+            let late = false;
 
             // Early classes
             //let early = x.time.start.hour <= 8;
@@ -267,8 +258,8 @@ fn main() {
             //
 
             // let mut early = x.time.start.hour <= 8 && x.campus == Campus::Centinnial;
-            let early = x.meetings.iter().any(|m| m.time.start.hour <= 8);
-            // let early = false;
+            //let early = x.meetings.iter().any(|m| m.time.start.hour <= 8);
+            let early = false;
 
             // :(
             // if x.class == "CSC 216" || x.class == "PY 209" {
@@ -293,40 +284,30 @@ fn main() {
     }
 
     println!("After filter");
-    for (k, v) in classes.iter() {
+    for v in classes.iter() {
         acc *= v.len();
-        println!("{k:?}: {:?}", v.len());
+        println!("{:?}: {:?}", v[0].class, v.len());
     }
 
     println!("Total possible {acc}");
 
     let solutions = possible_schedules(&classes);
 
-    // for (k, v) in classes {
-    //     println!("{k}, {v:?}")
-    // }
-
-    // for x in &solutions {
-    //     println!("{:?}", x);
-    // }
-
-    println!("Number of solutions: {}", solutions.len());
-    // println!("Len of solutions: {:?}", {
-    //     let mut y = solutions.iter().map(|x| x.len()).collect::<Vec<usize>>();
-    //     y.sort();
-    //     y.dedup();
-    //     y
-    // });
-
-    println!("{:?}", solutions.first().unwrap());
-
-    draw_classes(solutions).unwrap()
+    if solutions.len() == 0 {
+        eprintln!("No solutions found!");
+    } else {
+        println!(
+            "{} Solutions found",
+            solutions.iter().flat_map(Tree::all_paths).count()
+        );
+        draw_classes(&solutions).unwrap()
+    }
 }
 
-fn draw_classes(solutions: Vec<Vec<Section>>) -> Result<(), Box<dyn std::error::Error>> {
+fn draw_classes(solutions: &Vec<Tree>) -> Result<(), Box<dyn std::error::Error>> {
     _ = std::fs::create_dir("output_images");
 
-    for (i, data) in solutions.iter().enumerate() {
+    for (i, data) in solutions.iter().flat_map(Tree::all_paths).enumerate() {
         let name = format!("output_images/{i}.png");
         let root = BitMapBackend::new(&name, (640, 480)).into_drawing_area();
         root.fill(&WHITE)?;
@@ -420,9 +401,123 @@ fn draw_classes(solutions: Vec<Vec<Section>>) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
-fn possible_schedules(classes: &ClassMap) -> Vec<Vec<Section>> {
-    // Only like a million possible combinations, should be trivial to brute force
-    possible_schedules_recursive(classes.iter().map(|(_, v)| v.clone()).collect(), Vec::new())
+#[derive(Debug)]
+struct Tree<'a> {
+    value: &'a Section,
+    children: Vec<Tree<'a>>,
+}
+
+impl Tree<'_> {
+    fn depth(&self) -> usize {
+        let mut count = 0;
+        let mut curr = self;
+
+        while curr.children.len() > 0 {
+            count += 1;
+            curr = &curr.children[0];
+        }
+
+        count
+    }
+
+    fn all_paths(&self) -> AllPaths {
+        AllPaths {
+            tree: self,
+            current: vec![0; self.depth()],
+        }
+    }
+}
+
+#[derive(Debug)]
+struct AllPaths<'a> {
+    tree: &'a Tree<'a>,
+    current: Vec<usize>,
+}
+
+impl<'a> Iterator for AllPaths<'a> {
+    type Item = Vec<&'a Section>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Are we finished?
+        if self.current[0] == self.tree.children.len() {
+            return None;
+        }
+
+        // Get next vec
+        let mut res = Vec::new();
+        let mut lens = Vec::new();
+
+        let mut curr = self.tree;
+        for &x in &self.current {
+            res.push(curr.value);
+            lens.push(curr.children.len());
+
+            curr = &curr.children[x];
+        }
+        res.push(curr.value);
+        lens.push(curr.children.len());
+
+        // Add one with overflow
+        let len = self.current.len();
+        self.current[len - 1] += 1;
+
+        for i in (1..len).rev() {
+            if self.current[i] >= lens[i] {
+                self.current[i] = 0;
+                self.current[i - 1] += 1;
+            }
+        }
+
+        Some(res)
+    }
+}
+
+fn possible_schedules_recursive<'a>(
+    courses: &'a Vec<Vec<Section>>,
+    history: &mut Vec<usize>,
+) -> Option<Vec<Tree<'a>>> {
+    let index = history.len();
+    if index == courses.len() {
+        // base case
+        return Some(Vec::new());
+    }
+
+    let res: Vec<_> = courses[index]
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| {
+            history
+                .iter()
+                .enumerate()
+                .all(|(i, &j)| practical(&v, &courses[i][j]))
+        })
+        .collect();
+
+    // TODO: Ideally this wouldn't be required
+
+    let res: Vec<Tree> = res
+        .into_iter()
+        .filter_map(|(i, v)| {
+            history.push(i);
+            let res = possible_schedules_recursive(courses, history);
+            assert_eq!(Some(i), history.pop());
+
+            res.map(|res| Tree {
+                value: v,
+                children: res,
+            })
+        })
+        .collect();
+
+    if res.len() == 0 {
+        None
+    } else {
+        Some(res)
+    }
+}
+
+fn possible_schedules<'a>(courses: &'a Vec<Vec<Section>>) -> Vec<Tree<'a>> {
+    possible_schedules_recursive(courses, &mut Vec::new()).unwrap()
 }
 
 fn practical(this: &Section, other: &Section) -> bool {
@@ -447,47 +542,15 @@ fn practical(this: &Section, other: &Section) -> bool {
     !(overlap || campus_travel)
 }
 
-fn possible_schedules_recursive(
-    classes: Vec<Vec<Section>>,
-    solution: Vec<Section>,
-) -> Vec<Vec<Section>> {
-    let mut solutions = Vec::new();
-
-    let mut iter = classes.iter();
-    let current = iter.next().unwrap();
-    let rest: Vec<_> = iter.map(|x| x.clone()).collect();
-
-    for section in current.iter() {
-        if solution.iter().all(|x| practical(x, section)) {
-            let mut new_solution = solution.clone();
-            new_solution.push(section.clone());
-            if rest.len() == 0 {
-                solutions.push(new_solution);
-            } else {
-                solutions.append(&mut possible_schedules_recursive(
-                    rest.clone(),
-                    new_solution,
-                ));
-            }
-        }
-    }
-
-    solutions
-}
-
 #[allow(unused)]
-fn load_classes() -> ClassMap {
-    let mut map = HashMap::new();
-
-    for file_name in FILES_NAMES {
-        let reader = File::open(format! {"output/{file_name}.json"}).expect("File must exist");
-        map.insert(
-            file_name.to_string(),
-            serde_json::from_reader(reader).unwrap(),
-        );
-    }
-
-    map
+fn load_classes() -> Vec<Vec<Section>> {
+    FILES_NAMES
+        .iter()
+        .map(|file_name| {
+            let reader = File::open(format! {"output/{file_name}.json"}).expect("File must exist");
+            serde_json::from_reader(reader).unwrap()
+        })
+        .collect()
 }
 
 #[allow(unused)]
@@ -518,7 +581,7 @@ fn class_data(file_name: &str) -> Vec<Section> {
     // let data: Vec<_> = data.filter(|x| filter_8_30(x)).collect();
 
     let data: Vec<Section> = data
-        .iter()
+        .into_iter()
         .filter_map(|data| {
             let meetings = data
                 .section_details
@@ -567,7 +630,7 @@ fn class_data(file_name: &str) -> Vec<Section> {
                         .map(move |&meet_day| DayTime {
                             meet_day,
                             time,
-                            campus: campus.clone(),
+                            campus,
                         })
                         .collect::<Vec<_>>()
                 })
@@ -580,13 +643,10 @@ fn class_data(file_name: &str) -> Vec<Section> {
                 .unwrap_or(&String::from(""))
                 .clone();
 
-            let section: String = data.section_details[0].section.clone();
-            let facility: String = data.section_details[0].facility.clone();
-
             Some(Section {
-                class: data.classs.clone(),
-                section,
-                facility,
+                class: data.classs,
+                section: data.section_details[0].section.clone(),
+                facility: data.section_details[0].facility.clone(),
                 meetings,
                 professor,
             })
